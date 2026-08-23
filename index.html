@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Overlay TikTok LIVE</title>
+<title>Music Visualizer Overlay</title>
 
 <style>
 * {
@@ -16,348 +16,560 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: transparent;
-  font-family: Arial, sans-serif;
 }
 
 body {
-  color: white;
+  font-family: Arial, Helvetica, sans-serif;
 }
 
-#alerts {
-  position: absolute;
-  top: 8%;
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+#panel {
+  position: fixed;
   left: 50%;
-  transform: translateX(-50%);
-  width: 90%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 15px;
-}
-
-.alert {
-  min-width: 420px;
-  max-width: 90%;
-  padding: 16px 25px;
-  text-align: center;
-  border-radius: 20px;
-  background: rgba(10, 10, 20, 0.92);
-  border: 2px solid white;
-  box-shadow: 0 10px 35px rgba(0,0,0,.5);
-
-  animation:
-    apparition .5s ease-out,
-    disparition .6s ease-in 5s forwards;
-}
-
-.icon {
-  font-size: 36px;
-}
-
-.type {
-  margin-top: 4px;
-  font-size: 13px;
-  font-weight: bold;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  opacity: .8;
-}
-
-.name {
-  margin-top: 5px;
-  font-size: 28px;
-  font-weight: bold;
-}
-
-.message {
-  margin-top: 5px;
-  font-size: 17px;
-}
-
-.follow {
-  border-color: #65eaff;
-}
-
-.like {
-  border-color: #ff6fc7;
-}
-
-.gift {
-  border-color: #ffd45c;
-}
-
-.share {
-  border-color: #a78bfa;
-}
-
-#status {
-  position: absolute;
-  bottom: 25px;
-  left: 25px;
+  top: 50%;
+  transform: translate(-50%, -50%);
 
   display: flex;
+  gap: 10px;
   align-items: center;
-  gap: 9px;
 
-  padding: 10px 16px;
-  border-radius: 30px;
+  padding: 12px 16px;
 
-  background: rgba(0,0,0,.65);
-  border: 1px solid rgba(255,255,255,.25);
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 14px;
+
+  background: rgba(0,0,0,.72);
+  color: white;
 
   font-size: 14px;
 }
 
-#dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #55e88a;
-  box-shadow: 0 0 12px #55e88a;
+button {
+  border: 0;
+  border-radius: 9px;
+  padding: 9px 13px;
+  cursor: pointer;
 }
 
-.heart {
-  position: absolute;
-  font-size: 35px;
-  animation: coeur 3s ease-out forwards;
+#file {
+  display: none;
 }
 
-@keyframes apparition {
-  from {
-    opacity: 0;
-    transform: translateY(-35px) scale(.9);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+.hidden {
+  display: none !important;
 }
 
-@keyframes disparition {
-  to {
-    opacity: 0;
-    transform: translateY(-20px) scale(.95);
-  }
-}
-
-@keyframes coeur {
-  from {
-    opacity: 0;
-    transform: translateY(40px) scale(.6);
-  }
-
-  15% {
-    opacity: 1;
-  }
-
-  to {
-    opacity: 0;
-    transform: translateY(-250px) scale(1.5);
-  }
+#status {
+  opacity: .8;
 }
 </style>
 </head>
 
 <body>
 
-<div id="alerts"></div>
+<canvas id="visualizer"></canvas>
 
-<div id="status">
-  <span id="dot"></span>
-  <span>TikTok LIVE • Overlay actif</span>
+<div id="panel">
+
+  <button id="mic">
+    🎙️ Activer le son
+  </button>
+
+  <label for="file">
+    <button type="button">
+      🎵 Tester une musique
+    </button>
+  </label>
+
+  <input
+    id="file"
+    type="file"
+    accept="audio/*"
+  >
+
+  <span id="status">
+    En attente du son
+  </span>
+
 </div>
 
 <script>
 
-const icons = {
-  follow: "💙",
-  like: "❤️",
-  gift: "🎁",
-  share: "🔄"
-};
+const canvas =
+  document.getElementById("visualizer");
 
-const titles = {
-  follow: "Nouveau follower",
-  like: "Nouveaux likes",
-  gift: "Cadeau reçu",
-  share: "Partage du LIVE"
-};
+const ctx =
+  canvas.getContext("2d");
 
-function afficherAlerte(type, utilisateur, message) {
+const panel =
+  document.getElementById("panel");
 
-  if (!icons[type]) {
-    type = "follow";
-  }
+const micBtn =
+  document.getElementById("mic");
 
-  const alerte = document.createElement("div");
+const fileInput =
+  document.getElementById("file");
 
-  alerte.className = "alert " + type;
+const status =
+  document.getElementById("status");
 
-  alerte.innerHTML = `
-    <div class="icon">${icons[type]}</div>
-    <div class="type">${titles[type]}</div>
-    <div class="name">${securise(utilisateur)}</div>
-    <div class="message">${securise(message)}</div>
-  `;
+let audioCtx;
+let analyser;
+let source;
+let data;
+let raf;
 
-  document.getElementById("alerts").appendChild(alerte);
+let audioEl = null;
 
-  setTimeout(() => {
-    alerte.remove();
-  }, 5700);
 
-  if (type === "like" || type === "gift") {
-    creerCoeur();
-  }
+/* -------------------------
+   TAILLE DU VISUALISEUR
+------------------------- */
+
+function resize() {
+
+  const dpr =
+    Math.min(devicePixelRatio || 1, 2);
+
+  canvas.width =
+    innerWidth * dpr;
+
+  canvas.height =
+    innerHeight * dpr;
+
+  canvas.style.width =
+    innerWidth + "px";
+
+  canvas.style.height =
+    innerHeight + "px";
+
+  ctx.setTransform(
+    dpr,
+    0,
+    0,
+    dpr,
+    0,
+    0
+  );
 }
 
-function securise(texte) {
-
-  return String(texte || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function creerCoeur() {
-
-  const coeur = document.createElement("div");
-
-  coeur.className = "heart";
-
-  coeur.textContent =
-    Math.random() > .5 ? "❤️" : "💖";
-
-  coeur.style.right =
-    (5 + Math.random() * 20) + "vw";
-
-  coeur.style.bottom =
-    (10 + Math.random() * 20) + "vh";
-
-  document.body.appendChild(coeur);
-
-  setTimeout(() => {
-    coeur.remove();
-  }, 3000);
-}
-
-
-/*
-==================================================
-CONNEXION À UN OUTIL EXTERNE
-==================================================
-
-Un outil qui reçoit les événements TikTok
-peut envoyer ceci à l'overlay :
-
-{
-  type: "gift",
-  username: "Pseudo",
-  message: "Rose x10"
-}
-
-Types disponibles :
-
-follow
-like
-gift
-share
-*/
-
-window.addEventListener("message", function(event) {
-
-  const data = event.data;
-
-  if (!data || typeof data !== "object") {
-    return;
-  }
-
-  if (data.type) {
-
-    afficherAlerte(
-      data.type,
-      data.username || data.user || "Utilisateur TikTok",
-      data.message || data.text || ""
-    );
-
-  }
-
-});
-
-
-/*
-==================================================
-MODE TEST
-==================================================
-
-Pour tester l'animation, ajoute :
-
-?demo=1
-
-à la fin de l'adresse du site.
-*/
-
-const params = new URLSearchParams(
-  window.location.search
+addEventListener(
+  "resize",
+  resize
 );
 
-if (params.get("demo") === "1") {
+resize();
 
-  const demonstrations = [
 
-    [
-      "follow",
-      "SophieLive",
-      "vient de suivre le LIVE !"
-    ],
+/* -------------------------
+   ANALYSE AUDIO
+------------------------- */
 
-    [
-      "like",
-      "AlexTikTok",
-      "a envoyé des likes ❤️"
-    ],
+function setupAnalyser() {
 
-    [
-      "gift",
-      "Mika_Officiel",
-      "🎁 Rose x10"
-    ],
+  if (!audioCtx) {
 
-    [
-      "share",
-      "LucasLive",
-      "a partagé le LIVE !"
-    ]
+    audioCtx =
+      new (
+        window.AudioContext ||
+        window.webkitAudioContext
+      )();
 
-  ];
+    analyser =
+      audioCtx.createAnalyser();
 
-  let compteur = 0;
+    analyser.fftSize = 256;
 
-  function demonstration() {
+    analyser.smoothingTimeConstant =
+      0.78;
 
-    const demo =
-      demonstrations[
-        compteur % demonstrations.length
-      ];
+    data =
+      new Uint8Array(
+        analyser.frequencyBinCount
+      );
+  }
+}
 
-    afficherAlerte(
-      demo[0],
-      demo[1],
-      demo[2]
+
+/* -------------------------
+   MICROPHONE
+------------------------- */
+
+async function startMic() {
+
+  try {
+
+    setupAnalyser();
+
+    if (
+      audioCtx.state ===
+      "suspended"
+    ) {
+      await audioCtx.resume();
+    }
+
+    const stream =
+      await navigator.mediaDevices
+        .getUserMedia({
+          audio: true
+        });
+
+    if (source) {
+      source.disconnect();
+    }
+
+    source =
+      audioCtx.createMediaStreamSource(
+        stream
+      );
+
+    source.connect(
+      analyser
     );
 
-    compteur++;
+    status.textContent =
+      "Son actif";
+
+    panel.classList.add(
+      "hidden"
+    );
+
+    draw();
+
+  } catch (error) {
+
+    status.textContent =
+      "Autorisation micro refusée";
+  }
+}
+
+
+/* -------------------------
+   MUSIQUE DE TEST
+------------------------- */
+
+fileInput.addEventListener(
+  "change",
+  async () => {
+
+    const file =
+      fileInput.files[0];
+
+    if (!file) return;
+
+    setupAnalyser();
+
+    if (
+      audioCtx.state ===
+      "suspended"
+    ) {
+      await audioCtx.resume();
+    }
+
+    if (audioEl) {
+      audioEl.remove();
+    }
+
+    audioEl =
+      document.createElement(
+        "audio"
+      );
+
+    audioEl.controls = false;
+
+    audioEl.loop = true;
+
+    audioEl.src =
+      URL.createObjectURL(file);
+
+    audioEl.style.display =
+      "none";
+
+    document.body.appendChild(
+      audioEl
+    );
+
+    if (source) {
+      source.disconnect();
+    }
+
+    source =
+      audioCtx.createMediaElementSource(
+        audioEl
+      );
+
+    source.connect(
+      analyser
+    );
+
+    analyser.connect(
+      audioCtx.destination
+    );
+
+    await audioEl.play();
+
+    status.textContent =
+      "Musique active";
+
+    panel.classList.add(
+      "hidden"
+    );
+
+    draw();
+  }
+);
+
+
+micBtn.addEventListener(
+  "click",
+  startMic
+);
+
+
+/* -------------------------
+   VISUALISEUR
+------------------------- */
+
+function draw() {
+
+  cancelAnimationFrame(
+    raf
+  );
+
+  raf =
+    requestAnimationFrame(
+      draw
+    );
+
+  const w =
+    innerWidth;
+
+  const h =
+    innerHeight;
+
+  ctx.clearRect(
+    0,
+    0,
+    w,
+    h
+  );
+
+  if (!analyser) return;
+
+  analyser.getByteFrequencyData(
+    data
+  );
+
+
+  /*
+    Nombre de graduations
+  */
+
+  const bars = 64;
+
+  const gap = 5;
+
+  const totalW =
+    Math.min(
+      w * 0.86,
+      1500
+    );
+
+  const barW =
+    (
+      totalW -
+      gap * (bars - 1)
+    ) / bars;
+
+  const x0 =
+    (w - totalW) / 2;
+
+  const base =
+    h * 0.72;
+
+  const maxH =
+    h * 0.42;
+
+
+  for (
+    let i = 0;
+    i < bars;
+    i++
+  ) {
+
+    const position =
+      i / (bars - 1);
+
+    const mirror =
+      Math.abs(
+        position - 0.5
+      ) * 2;
+
+    const bin =
+      Math.floor(
+        position *
+        (data.length - 1)
+      );
+
+    const volume =
+      data[bin] / 255;
+
+
+    /*
+      Accentuation des basses
+      au centre
+    */
+
+    const bassWeight =
+      1 - mirror * 0.68;
+
+    const level =
+      Math.pow(
+        volume,
+        1.35
+      ) *
+      (
+        0.38 +
+        bassWeight * 0.9
+      );
+
+    const barH =
+      Math.max(
+        3,
+        level * maxH
+      );
+
+    const x =
+      x0 +
+      i * (
+        barW + gap
+      );
+
+    const y =
+      base - barH;
+
+
+    /*
+      Dégradé de la graduation
+    */
+
+    const gradient =
+      ctx.createLinearGradient(
+        0,
+        y,
+        0,
+        base
+      );
+
+    gradient.addColorStop(
+      0,
+      "rgba(255,255,255,.98)"
+    );
+
+    gradient.addColorStop(
+      .45,
+      "rgba(180,180,255,.9)"
+    );
+
+    gradient.addColorStop(
+      1,
+      "rgba(255,255,255,.18)"
+    );
+
+    ctx.fillStyle =
+      gradient;
+
+
+    roundRect(
+      ctx,
+      x,
+      y,
+      barW,
+      barH,
+      Math.min(
+        5,
+        barW / 2
+      )
+    );
   }
 
-  setTimeout(demonstration, 1000);
 
-  setInterval(
-    demonstration,
-    6500
+  /*
+    Ligne de base
+  */
+
+  ctx.fillStyle =
+    "rgba(255,255,255,.25)";
+
+  ctx.fillRect(
+    x0,
+    base,
+    totalW,
+    2
   );
+}
+
+
+/* -------------------------
+   RECTANGLE ARRONDI
+------------------------- */
+
+function roundRect(
+  c,
+  x,
+  y,
+  w,
+  h,
+  r
+) {
+
+  c.beginPath();
+
+  c.moveTo(
+    x + r,
+    y
+  );
+
+  c.arcTo(
+    x + w,
+    y,
+    x + w,
+    y + h,
+    r
+  );
+
+  c.arcTo(
+    x + w,
+    y + h,
+    x,
+    y + h,
+    r
+  );
+
+  c.arcTo(
+    x,
+    y + h,
+    x,
+    y,
+    r
+  );
+
+  c.arcTo(
+    x,
+    y,
+    x + w,
+    y,
+    r
+  );
+
+  c.closePath();
+
+  c.fill();
 }
 
 </script>
