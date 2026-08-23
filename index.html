@@ -3,69 +3,33 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <title>Music Visualizer Overlay</title>
 
 <style>
 * {
-  box-sizing: border-box;
+    box-sizing: border-box;
 }
 
-html, body {
-  margin: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: transparent;
+html,
+body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
 }
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+    font-family: Arial, Helvetica, sans-serif;
 }
 
 canvas {
-  display: block;
-  width: 100vw;
-  height: 100vh;
-}
-
-#panel {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-
-  display: flex;
-  gap: 10px;
-  align-items: center;
-
-  padding: 12px 16px;
-
-  border: 1px solid rgba(255,255,255,.22);
-  border-radius: 14px;
-
-  background: rgba(0,0,0,.72);
-  color: white;
-
-  font-size: 14px;
-}
-
-button {
-  border: 0;
-  border-radius: 9px;
-  padding: 9px 13px;
-  cursor: pointer;
-}
-
-#file {
-  display: none;
-}
-
-.hidden {
-  display: none !important;
-}
-
-#status {
-  opacity: .8;
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
 }
 </style>
 </head>
@@ -74,503 +38,675 @@ button {
 
 <canvas id="visualizer"></canvas>
 
-<div id="panel">
-
-  <button id="mic">
-    🎙️ Activer le son
-  </button>
-
-  <label for="file">
-    <button type="button">
-      🎵 Tester une musique
-    </button>
-  </label>
-
-  <input
-    id="file"
-    type="file"
-    accept="audio/*"
-  >
-
-  <span id="status">
-    En attente du son
-  </span>
-
-</div>
-
 <script>
 
-const canvas =
-  document.getElementById("visualizer");
+const canvas = document.getElementById("visualizer");
+const ctx = canvas.getContext("2d");
 
-const ctx =
-  canvas.getContext("2d");
-
-const panel =
-  document.getElementById("panel");
-
-const micBtn =
-  document.getElementById("mic");
-
-const fileInput =
-  document.getElementById("file");
-
-const status =
-  document.getElementById("status");
-
-let audioCtx;
-let analyser;
-let source;
-let data;
-let raf;
-
-let audioEl = null;
+let audioContext = null;
+let analyser = null;
+let audioSource = null;
+let frequencyData = null;
+let animationFrame = null;
 
 
-/* -------------------------
-   TAILLE DU VISUALISEUR
-------------------------- */
+/* =========================
+   TAILLE DE L'OVERLAY
+========================= */
 
-function resize() {
+function resizeCanvas() {
 
-  const dpr =
-    Math.min(devicePixelRatio || 1, 2);
+    const ratio =
+        Math.min(
+            window.devicePixelRatio || 1,
+            2
+        );
 
-  canvas.width =
-    innerWidth * dpr;
+    canvas.width =
+        window.innerWidth * ratio;
 
-  canvas.height =
-    innerHeight * dpr;
+    canvas.height =
+        window.innerHeight * ratio;
 
-  canvas.style.width =
-    innerWidth + "px";
+    canvas.style.width =
+        window.innerWidth + "px";
 
-  canvas.style.height =
-    innerHeight + "px";
+    canvas.style.height =
+        window.innerHeight + "px";
 
-  ctx.setTransform(
-    dpr,
-    0,
-    0,
-    dpr,
-    0,
-    0
-  );
+    ctx.setTransform(
+        ratio,
+        0,
+        0,
+        ratio,
+        0,
+        0
+    );
 }
 
-addEventListener(
-  "resize",
-  resize
+window.addEventListener(
+    "resize",
+    resizeCanvas
 );
 
-resize();
+resizeCanvas();
 
 
-/* -------------------------
-   ANALYSE AUDIO
-------------------------- */
+/* =========================
+   INITIALISATION AUDIO
+========================= */
 
-function setupAnalyser() {
+function initializeAudio(stream) {
 
-  if (!audioCtx) {
+    if (!audioContext) {
 
-    audioCtx =
-      new (
-        window.AudioContext ||
-        window.webkitAudioContext
-      )();
+        audioContext =
+            new (
+                window.AudioContext ||
+                window.webkitAudioContext
+            )();
 
-    analyser =
-      audioCtx.createAnalyser();
+        analyser =
+            audioContext.createAnalyser();
 
-    analyser.fftSize = 256;
+        /*
+          Plus la valeur est grande,
+          plus l'animation est fluide.
+        */
 
-    analyser.smoothingTimeConstant =
-      0.78;
+        analyser.fftSize = 512;
 
-    data =
-      new Uint8Array(
-        analyser.frequencyBinCount
-      );
-  }
-}
+        analyser.smoothingTimeConstant =
+            0.82;
 
-
-/* -------------------------
-   MICROPHONE
-------------------------- */
-
-async function startMic() {
-
-  try {
-
-    setupAnalyser();
+        frequencyData =
+            new Uint8Array(
+                analyser.frequencyBinCount
+            );
+    }
 
     if (
-      audioCtx.state ===
-      "suspended"
+        audioContext.state ===
+        "suspended"
     ) {
-      await audioCtx.resume();
+
+        audioContext.resume();
     }
 
-    const stream =
-      await navigator.mediaDevices
-        .getUserMedia({
-          audio: true
-        });
+    if (audioSource) {
 
-    if (source) {
-      source.disconnect();
+        try {
+            audioSource.disconnect();
+        }
+        catch (error) {}
     }
 
-    source =
-      audioCtx.createMediaStreamSource(
-        stream
-      );
+    audioSource =
+        audioContext.createMediaStreamSource(
+            stream
+        );
 
-    source.connect(
-      analyser
+    audioSource.connect(
+        analyser
     );
 
-    status.textContent =
-      "Son actif";
-
-    panel.classList.add(
-      "hidden"
-    );
-
-    draw();
-
-  } catch (error) {
-
-    status.textContent =
-      "Autorisation micro refusée";
-  }
+    startVisualizer();
 }
 
 
-/* -------------------------
-   MUSIQUE DE TEST
-------------------------- */
+/* =========================
+   RÉCEPTION D'UN FLUX AUDIO
+========================= */
 
-fileInput.addEventListener(
-  "change",
-  async () => {
+window.addEventListener(
+    "message",
+    function(event) {
 
-    const file =
-      fileInput.files[0];
+        const data = event.data;
 
-    if (!file) return;
+        if (!data) {
+            return;
+        }
 
-    setupAnalyser();
+        /*
+          Permet à une source externe
+          d'envoyer un MediaStream.
+        */
 
-    if (
-      audioCtx.state ===
-      "suspended"
-    ) {
-      await audioCtx.resume();
+        if (
+            data.type ===
+            "audio-stream"
+            &&
+            data.stream instanceof MediaStream
+        ) {
+
+            initializeAudio(
+                data.stream
+            );
+        }
+
     }
-
-    if (audioEl) {
-      audioEl.remove();
-    }
-
-    audioEl =
-      document.createElement(
-        "audio"
-      );
-
-    audioEl.controls = false;
-
-    audioEl.loop = true;
-
-    audioEl.src =
-      URL.createObjectURL(file);
-
-    audioEl.style.display =
-      "none";
-
-    document.body.appendChild(
-      audioEl
-    );
-
-    if (source) {
-      source.disconnect();
-    }
-
-    source =
-      audioCtx.createMediaElementSource(
-        audioEl
-      );
-
-    source.connect(
-      analyser
-    );
-
-    analyser.connect(
-      audioCtx.destination
-    );
-
-    await audioEl.play();
-
-    status.textContent =
-      "Musique active";
-
-    panel.classList.add(
-      "hidden"
-    );
-
-    draw();
-  }
 );
 
 
-micBtn.addEventListener(
-  "click",
-  startMic
+/* =========================
+   TEST MICROPHONE
+========================= */
+
+async function activateMicrophone() {
+
+    try {
+
+        const stream =
+            await navigator.mediaDevices
+                .getUserMedia({
+
+                    audio: {
+
+                        echoCancellation:
+                            false,
+
+                        noiseSuppression:
+                            false,
+
+                        autoGainControl:
+                            false
+                    }
+
+                });
+
+        initializeAudio(
+            stream
+        );
+
+    }
+
+    catch (error) {
+
+        /*
+          Aucun message à l'écran :
+          l'overlay reste totalement
+          transparent.
+        */
+
+        console.log(
+            "Source audio indisponible."
+        );
+    }
+}
+
+
+/*
+  Double-clic = test microphone.
+
+  Aucun bouton n'est affiché.
+*/
+
+window.addEventListener(
+    "dblclick",
+    activateMicrophone
 );
 
 
-/* -------------------------
-   VISUALISEUR
-------------------------- */
+/* =========================
+   DÉMARRAGE DU VISUALISEUR
+========================= */
 
-function draw() {
+function startVisualizer() {
 
-  cancelAnimationFrame(
-    raf
-  );
+    if (!analyser) {
+        return;
+    }
 
-  raf =
-    requestAnimationFrame(
-      draw
+    cancelAnimationFrame(
+        animationFrame
     );
 
-  const w =
-    innerWidth;
-
-  const h =
-    innerHeight;
-
-  ctx.clearRect(
-    0,
-    0,
-    w,
-    h
-  );
-
-  if (!analyser) return;
-
-  analyser.getByteFrequencyData(
-    data
-  );
+    drawVisualizer();
+}
 
 
-  /*
-    Nombre de graduations
-  */
+/* =========================
+   VISUALISEUR MUSICAL
+========================= */
 
-  const bars = 64;
+function drawVisualizer() {
 
-  const gap = 5;
+    animationFrame =
+        requestAnimationFrame(
+            drawVisualizer
+        );
 
-  const totalW =
-    Math.min(
-      w * 0.86,
-      1500
+    if (!analyser) {
+        return;
+    }
+
+    const width =
+        window.innerWidth;
+
+    const height =
+        window.innerHeight;
+
+    /*
+      Efface l'écran mais conserve
+      le fond transparent.
+    */
+
+    ctx.clearRect(
+        0,
+        0,
+        width,
+        height
     );
-
-  const barW =
-    (
-      totalW -
-      gap * (bars - 1)
-    ) / bars;
-
-  const x0 =
-    (w - totalW) / 2;
-
-  const base =
-    h * 0.72;
-
-  const maxH =
-    h * 0.42;
-
-
-  for (
-    let i = 0;
-    i < bars;
-    i++
-  ) {
-
-    const position =
-      i / (bars - 1);
-
-    const mirror =
-      Math.abs(
-        position - 0.5
-      ) * 2;
-
-    const bin =
-      Math.floor(
-        position *
-        (data.length - 1)
-      );
-
-    const volume =
-      data[bin] / 255;
 
 
     /*
-      Accentuation des basses
-      au centre
+      Récupération des fréquences.
     */
 
-    const bassWeight =
-      1 - mirror * 0.68;
-
-    const level =
-      Math.pow(
-        volume,
-        1.35
-      ) *
-      (
-        0.38 +
-        bassWeight * 0.9
-      );
-
-    const barH =
-      Math.max(
-        3,
-        level * maxH
-      );
-
-    const x =
-      x0 +
-      i * (
-        barW + gap
-      );
-
-    const y =
-      base - barH;
+    analyser.getByteFrequencyData(
+        frequencyData
+    );
 
 
     /*
-      Dégradé de la graduation
+      Nombre de graduations.
     */
 
-    const gradient =
-      ctx.createLinearGradient(
-        0,
-        y,
-        0,
-        base
-      );
+    const bars = 72;
 
-    gradient.addColorStop(
-      0,
-      "rgba(255,255,255,.98)"
-    );
 
-    gradient.addColorStop(
-      .45,
-      "rgba(180,180,255,.9)"
-    );
+    /*
+      Espace entre les graduations.
+    */
 
-    gradient.addColorStop(
-      1,
-      "rgba(255,255,255,.18)"
-    );
+    const gap =
+        Math.max(
+            3,
+            Math.min(
+                7,
+                width / 300
+            )
+        );
+
+
+    /*
+      Largeur totale.
+    */
+
+    const totalWidth =
+        Math.min(
+            width * 0.82,
+            1600
+        );
+
+
+    /*
+      Largeur d'une graduation.
+    */
+
+    const barWidth =
+        (
+            totalWidth -
+            gap * (bars - 1)
+        ) / bars;
+
+
+    /*
+      Position centrale.
+    */
+
+    const center =
+        width / 2;
+
+
+    /*
+      Ligne horizontale
+      sur laquelle reposent
+      les graduations.
+    */
+
+    const baseline =
+        height * 0.76;
+
+
+    /*
+      Hauteur maximale.
+    */
+
+    const maximumHeight =
+        height * 0.48;
+
+
+    /*
+      Création des graduations.
+    */
+
+    for (
+        let i = 0;
+        i < bars;
+        i++
+    ) {
+
+        const position =
+            i / (bars - 1);
+
+
+        /*
+          Distance par rapport
+          au centre.
+        */
+
+        const distance =
+            Math.abs(
+                position - 0.5
+            ) * 2;
+
+
+        /*
+          Lecture symétrique
+          du spectre audio.
+        */
+
+        const frequencyIndex =
+            Math.min(
+                frequencyData.length - 1,
+
+                Math.floor(
+                    distance *
+                    (
+                        frequencyData.length *
+                        0.78
+                    )
+                )
+            );
+
+
+        /*
+          Niveau audio.
+        */
+
+        const audioLevel =
+            frequencyData[
+                frequencyIndex
+            ] / 255;
+
+
+        /*
+          Accentuation des basses
+          au centre.
+        */
+
+        const bass =
+            1 -
+            distance * 0.55;
+
+
+        /*
+          Réaction de la graduation.
+        */
+
+        const level =
+            Math.pow(
+                audioLevel,
+                1.18
+            ) *
+            (
+                0.35 +
+                bass
+            );
+
+
+        /*
+          Hauteur finale.
+        */
+
+        const barHeight =
+            Math.max(
+                3,
+                level *
+                maximumHeight
+            );
+
+
+        /*
+          Position X.
+        */
+
+        const x =
+            center -
+            totalWidth / 2 +
+            i *
+            (
+                barWidth +
+                gap
+            );
+
+
+        /*
+          Position Y.
+        */
+
+        const y =
+            baseline -
+            barHeight;
+
+
+        /*
+          Dégradé de la graduation.
+        */
+
+        const gradient =
+            ctx.createLinearGradient(
+                0,
+                y,
+                0,
+                baseline
+            );
+
+
+        gradient.addColorStop(
+            0,
+            "rgba(255,255,255,1)"
+        );
+
+        gradient.addColorStop(
+            0.5,
+            "rgba(235,235,255,.88)"
+        );
+
+        gradient.addColorStop(
+            1,
+            "rgba(255,255,255,.18)"
+        );
+
+
+        ctx.fillStyle =
+            gradient;
+
+
+        /*
+          Graduation arrondie.
+        */
+
+        drawRoundedRectangle(
+            x,
+            y,
+            barWidth,
+            barHeight,
+            Math.min(
+                5,
+                barWidth / 2
+            )
+        );
+
+
+        /*
+          Petite lumière au sommet.
+        */
+
+        if (
+            barHeight >
+            15
+        ) {
+
+            ctx.fillStyle =
+                "rgba(255,255,255,.95)";
+
+            ctx.fillRect(
+                x,
+                y,
+                barWidth,
+                Math.min(
+                    2,
+                    barHeight
+                )
+            );
+        }
+
+    }
+
+
+    /*
+      Ligne de base discrète.
+    */
 
     ctx.fillStyle =
-      gradient;
+        "rgba(255,255,255,.18)";
 
+    ctx.fillRect(
+        center -
+        totalWidth / 2,
 
-    roundRect(
-      ctx,
-      x,
-      y,
-      barW,
-      barH,
-      Math.min(
-        5,
-        barW / 2
-      )
+        baseline,
+
+        totalWidth,
+
+        2
     );
-  }
 
 
-  /*
-    Ligne de base
-  */
+    /*
+      Pulsation générale
+      selon le volume.
+    */
 
-  ctx.fillStyle =
-    "rgba(255,255,255,.25)";
+    let total =
+        0;
 
-  ctx.fillRect(
-    x0,
-    base,
-    totalW,
-    2
-  );
+
+    for (
+        let i = 0;
+        i <
+        frequencyData.length;
+        i++
+    ) {
+
+        total +=
+            frequencyData[i];
+    }
+
+
+    const average =
+        total /
+        frequencyData.length /
+        255;
+
+
+    if (
+        average >
+        0.08
+    ) {
+
+        const glow =
+            Math.min(
+                0.12,
+                average * 0.18
+            );
+
+
+        ctx.fillStyle =
+            "rgba(255,255,255," +
+            glow +
+            ")";
+
+
+        ctx.fillRect(
+
+            center -
+            totalWidth / 2,
+
+            baseline - 2,
+
+            totalWidth,
+
+            4
+        );
+    }
+
 }
 
 
-/* -------------------------
+/* =========================
    RECTANGLE ARRONDI
-------------------------- */
+========================= */
 
-function roundRect(
-  c,
-  x,
-  y,
-  w,
-  h,
-  r
+function drawRoundedRectangle(
+    x,
+    y,
+    width,
+    height,
+    radius
 ) {
 
-  c.beginPath();
+    ctx.beginPath();
 
-  c.moveTo(
-    x + r,
-    y
-  );
+    ctx.moveTo(
+        x + radius,
+        y
+    );
 
-  c.arcTo(
-    x + w,
-    y,
-    x + w,
-    y + h,
-    r
-  );
+    ctx.arcTo(
+        x + width,
+        y,
+        x + width,
+        y + height,
+        radius
+    );
 
-  c.arcTo(
-    x + w,
-    y + h,
-    x,
-    y + h,
-    r
-  );
+    ctx.arcTo(
+        x + width,
+        y + height,
+        x,
+        y + height,
+        radius
+    );
 
-  c.arcTo(
-    x,
-    y + h,
-    x,
-    y,
-    r
-  );
+    ctx.arcTo(
+        x,
+        y + height,
+        x,
+        y,
+        radius
+    );
 
-  c.arcTo(
-    x,
-    y,
-    x + w,
-    y,
-    r
-  );
+    ctx.arcTo(
+        x,
+        y,
+        x + width,
+        y,
+        radius
+    );
 
-  c.closePath();
+    ctx.closePath();
 
-  c.fill();
+    ctx.fill();
 }
+
+
+/* =========================
+   FIN
+========================= */
 
 </script>
 
